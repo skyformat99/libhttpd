@@ -60,6 +60,7 @@ extern LIBHTTPD_API void libhttpd__loglevel(int level);
 extern LIBHTTPD_API const char *libhttpd_request_method(struct libhttpd_request *req);
 extern LIBHTTPD_API const char *libhttpd_request_url(struct libhttpd_request *req);
 extern LIBHTTPD_API const char *libhttpd_request_header(struct libhttpd_request *req, const char *header);
+extern LIBHTTPD_API const char *libhttpd_request_body(struct libhttpd_request *req, int *size);
 
 /* generic libhttpd response functions. */
 extern LIBHTTPD_API void libhttpd_response_header(struct libhttpd_response *res, const char *header, const char *value);

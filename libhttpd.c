@@ -210,6 +210,11 @@ const char *libhttpd_request_header(struct libhttpd_request *req, const char *ke
     return 0;
 }
 
+const char *libhttpd_request_body(struct libhttpd_request *req, int *size) {
+    *size = req->size;
+    return req->body;
+}
+
 
 void libhttpd_response_header(struct libhttpd_response *res, const char *key, const char *value) {
     struct libhttpd_header *header;
