@@ -39,28 +39,35 @@ extern "C" {
 # define LIBHTTPD_API
 #endif
 
+/* libhttpd log level enums. */
+enum {
+	LIBHTTPD_LOG_DEBUG,
+	LIBHTTPD_LOG_INFO,
+	LIBHTTPD_LOG_WARN,
+	LIBHTTPD_LOG_ERROR,
+};
 
-#define LIBHTTPD_SUCCESS             0       /* success. */
-
-/* define errors. */
-#define LIBHTTPD_ERROR_NULL          -1      /* null pointer access. */
-#define LIBHTTPD_ERROR_MALLOC        -2      /* memory allocation error. */
-#define LIBHTTPD_ERROR_CONNECT       -3      /* tcp connection error. */
-#define LIBHTTPD_ERROR_WRITE         -4      /* tcp write error. */
-#define LIBHTTPD_ERROR_EVENT_CREATE	 -5		 /* event create error. */
-
-/* libhttpd structure. */
+/* libhttpd structures. */
 struct libhttpd_request;
 struct libhttpd_response;
 
 /* libhttpd callback. */
 typedef void (* libhttpd_cb)(void *ud, struct libhttpd_request *req, struct libhttpd_response *res);
 
-/* string error message for a libhttpd return code. */
-extern LIBHTTPD_API const char *libhttpd__strerror(int rc);
+extern LIBHTTPD_API void libhttpd__loglevel(int level);
 
-/* generic libhttpd listen function. */
-extern LIBHTTPD_API int libhttpd__listen(char *host, int port, void *ud, libhttpd_cb cb);
+/* generic libhttpd request functions. */
+extern LIBHTTPD_API const char *libhttpd_request_method(struct libhttpd_request *req);
+extern LIBHTTPD_API const char *libhttpd_request_url(struct libhttpd_request *req);
+extern LIBHTTPD_API const char *libhttpd_request_header(struct libhttpd_request *req, const char *header);
+
+/* generic libhttpd response functions. */
+extern LIBHTTPD_API void libhttpd_response_header(struct libhttpd_response *res, const char *header, const char *value);
+extern LIBHTTPD_API void libhttpd_response_write(struct libhttpd_response *res, const char *body, int size);
+extern LIBHTTPD_API void libhttpd_response_end(struct libhttpd_response *res, int status);
+
+/* generic libhttpd functions. */
+extern LIBHTTPD_API void libhttpd__serve(char *host, int port, void *ud, libhttpd_cb cb);
 
 #ifdef __cplusplus
 }
