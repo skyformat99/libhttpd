@@ -1,0 +1,38 @@
+dist: trusty
+sudo: required
+
+language: c
+
+os:
+    - linux
+    - osx
+
+compiler:
+    - clang
+    - gcc
+
+branches:
+    only:
+        - master
+
+script:
+    - ./autogen.sh
+    - ./configure
+    - make
+    - make distcheck
+
+env:
+  global:
+   # The next declaration is the encrypted COVERITY_SCAN_TOKEN, created
+   #   via the "travis encrypt" command using the project repo's public key
+   - secure: "TyaiTrFc7l74JdOmq6FXdWAIzR6ZD/EVbZvYIBW5gvYNYNSoyLO0mmMWS32UOFxN+gyzQlbV5AiudzQI7yjCu0QvEw4O6dlF9gT74dsCdB0/kaoVGVUI3t6ukBoH3aGNo1Oa56kbtGxUox8lc4CtxgvuM5yPCcbRnfpJqf0JuqLZprcf/Gax7U8Xut9DKJeGzdTTgtswjCFnSPJ4iAbcTdDA5kxHqlXeIVNLE7ZMLwvMx59sGDb7M/lRDhQz9yKfy+XKE9OGVjYuG5XRMNRpMwl+h6BfwO3TwGY2qghw5RO7kQXlKzny0c14YKzcjp+FhV6gS5RjU4a+hEuedK9LHqkVOJxh8edDccQuj5muoGZw7ul9JEiqWIPD2KPRJzOgJV/GgTJViAt2NcvfwVmUe4cl1jjS5wAO06jyaIpWEZ19MiIeilew1fsAF8eahJTnSn13bPqASKWxIkWp5kDPgoCSpEB8yWqCml0vGOnYiucx4AV1NzZnmBxvtGhEVz4hNM3Jlx2i8sLPO404m1wohMEvwcE9/k5vtpf3dL53TcS3KoOSTy688A2PM2kQmt1JrYH62qaVOWXwRtatUUzJPT1RgUf29D1M38MtDs3nwf1dK2isxN/lHfeKY4kAIiu9DJMuMlNakhMbBqlEMjdrBsEJoCOMQq4JNdgcqz9PRIc="
+
+addons:
+  coverity_scan:
+    project:
+      name: "zhoukk/libhttpd"
+      description: "Build submitted via Travis CI"
+    notification_email: izhoukk@gmail.com
+    build_command_prepend: "./autogen.sh; ./configure; make clean"
+    build_command:   "make"
+    branch_pattern: coverity_scan

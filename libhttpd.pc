@@ -1,0 +1,11 @@
+prefix=/usr/local
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: libhttpd
+Version: 0.1.0
+Description: http server library writen in c.
+
+Libs: -L${libdir} -lhttpd 
+Cflags: -I${includedir}
