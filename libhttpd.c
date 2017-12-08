@@ -353,27 +353,27 @@ void libhttpd_response_end(struct libhttpd_response *res, int status) {
     struct libhttpd_connection *conn;
     struct libhttpd_header *header;
     struct libhttpd_buffer *buffer;
-    int n, nwrite;
+    int size;
     char buff[LIBHTTPD_RES_HEADER_LEN];
     int buff_size = LIBHTTPD_RES_HEADER_LEN;
 
     conn = res->conn;
-    n = snprintf(buff, buff_size, "HTTP/1.1 %s\r\n", http_status_str(status));
+    size = snprintf(buff, buff_size, "HTTP/1.1 %s\r\n", http_status_str(status));
 
     header = res->header.head;
     while (header) {
         if (header->value) {
-            n += snprintf(buff+n, buff_size-n, "%s: %s\r\n", header->field, header->value);
+            size += snprintf(buff+size, buff_size-size, "%s: %s\r\n", header->field, header->value);
         }
         header = header->next;
     }
-    n += snprintf(buff+n, buff_size-n, "Content-Length: %d\r\n\r\n", res->body_size);
+    size += snprintf(buff+size, buff_size-size, "Content-Length: %d\r\n\r\n", res->body_size);
 
     buffer = (struct libhttpd_buffer *)malloc(sizeof *buffer);
     memset(buffer, 0, sizeof *buffer);
-    buffer->data = malloc(n);
-    memcpy(buffer->data, buff, n);
-    buffer->size = n;
+    buffer->data = malloc(size);
+    memcpy(buffer->data, buff, size);
+    buffer->size = size;
 
     buffer->next = res->body.head;
     res->body.head = buffer;
@@ -532,7 +532,6 @@ __httpd_on_message_complete(http_parser *p) {
 static void
 __httpd_read(aeEventLoop *el, int fd, void *privdata, int mask) {
     struct libhttpd_connection *conn;
-    struct libhttpd *httpd;
     int nread, parsed;
     char buff[LIBHTTPD_READ_LEN];
     UNUSED(el);
@@ -550,7 +549,6 @@ __httpd_read(aeEventLoop *el, int fd, void *privdata, int mask) {
     };
 
     conn = (struct libhttpd_connection *)privdata;
-    httpd = conn->httpd;
 
     nread = read(fd, buff, LIBHTTPD_READ_LEN);
     __DEBUG("__httpd_read read %d", nread);
