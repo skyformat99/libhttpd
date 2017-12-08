@@ -55,5 +55,5 @@ stamp-h1
 .exvim..exvim
 .libs
 autom4te.cache
-lib
+lib/.dirstamp
 m4

@@ -30,6 +30,7 @@
 #include <string.h>
 #include <time.h>
 #include <locale.h>
+#include <signal.h>
 
 static char host[128] = "0.0.0.0";
 static int port = 8080;
