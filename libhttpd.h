@@ -41,10 +41,10 @@ extern "C" {
 
 /* libhttpd log level enums. */
 enum {
-	LIBHTTPD_LOG_DEBUG,
-	LIBHTTPD_LOG_INFO,
-	LIBHTTPD_LOG_WARN,
-	LIBHTTPD_LOG_ERROR,
+    LIBHTTPD_LOG_DEBUG,
+    LIBHTTPD_LOG_INFO,
+    LIBHTTPD_LOG_WARN,
+    LIBHTTPD_LOG_ERROR,
 };
 
 /* libhttpd structures. */
@@ -59,12 +59,12 @@ extern LIBHTTPD_API void libhttpd__loglevel(int level);
 /* generic libhttpd request functions. */
 extern LIBHTTPD_API const char *libhttpd_request_method(struct libhttpd_request *req);
 extern LIBHTTPD_API const char *libhttpd_request_url(struct libhttpd_request *req);
-extern LIBHTTPD_API const char *libhttpd_request_header(struct libhttpd_request *req, const char *header);
+extern LIBHTTPD_API const char *libhttpd_request_header(struct libhttpd_request *req, const char *field);
 extern LIBHTTPD_API const char *libhttpd_request_body(struct libhttpd_request *req, int *size);
 
 /* generic libhttpd response functions. */
-extern LIBHTTPD_API void libhttpd_response_header(struct libhttpd_response *res, const char *header, const char *value);
-extern LIBHTTPD_API void libhttpd_response_write(struct libhttpd_response *res, const char *body, int size);
+extern LIBHTTPD_API void libhttpd_response_header(struct libhttpd_response *res, const char *field, const char *value);
+extern LIBHTTPD_API void libhttpd_response_write(struct libhttpd_response *res, const char *data, int size);
 extern LIBHTTPD_API void libhttpd_response_end(struct libhttpd_response *res, int status);
 
 /* generic libhttpd functions. */

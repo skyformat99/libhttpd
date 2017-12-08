@@ -1,5 +1,5 @@
 /*
- * libhttpd_main.c -- sample http server.
+ * httpd.c -- sample http server.
  *
  * Copyright (c) zhoukk <izhoukk@gmail.com>
  *

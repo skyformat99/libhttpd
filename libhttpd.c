@@ -39,9 +39,9 @@
 #include <sys/socket.h>
 
 #define LIBHTTPD_BACKLOG 511
-#define LIBHTTPD_READ_BUFF 4096
-#define LIBHTTPD_LOG_BUFF 4096
-#define LIBHTTPD_RES_BUFF 1024000
+#define LIBHTTPD_READ_LEN 4096
+#define LIBHTTPD_LOG_LEN 4096
+#define LIBHTTPD_RES_HEADER_LEN 40960
 #define LIBHTTPD_MAX_ACCEPTS_PER_CALL 1000
 #define LIBHTTPD_NET_IP_STR_LEN 46
 
@@ -55,8 +55,15 @@
 struct libhttpd;
 struct libhttpd_connection;
 
+struct libhttpd_buffer {
+    char *data;
+    int size;
+
+    struct libhttpd_buffer *next;
+};
+
 struct libhttpd_header {
-    char *header;
+    char *field;
     char *value;
 
     struct libhttpd_header *next;
@@ -71,9 +78,10 @@ struct libhttpd_request {
     } header;
 
     char *url;
+    int content_length;
 
     char *body;
-    int size;
+    int body_size;
 };
 
 struct libhttpd_response {
@@ -84,8 +92,12 @@ struct libhttpd_response {
         struct libhttpd_header *tail;
     } header;
 
-    char *body;
-    int size;
+    struct {
+        struct libhttpd_buffer *head;
+        struct libhttpd_buffer *tail;
+    } body;
+    int buffer_pos;
+    int body_size;
 };
 
 struct libhttpd_connection {
@@ -118,12 +130,12 @@ static void
 __log(int level, const char *fmt, ...) {
     int n;
     va_list ap;
-    char logbuf[LIBHTTPD_LOG_BUFF];
+    char logbuf[LIBHTTPD_LOG_LEN];
 
     if (level < g_log_level) return;
 
     va_start(ap, fmt);
-    n = vsnprintf(logbuf, LIBHTTPD_LOG_BUFF, fmt, ap);
+    n = vsnprintf(logbuf, LIBHTTPD_LOG_LEN, fmt, ap);
     va_end(ap);
     logbuf[n] = '\0';
     fprintf(stdout, "%s\n", logbuf);
@@ -147,13 +159,14 @@ __httpd_request_free(struct libhttpd_request *req) {
     header = req->header.head;
     while (header) {
         struct libhttpd_header *next;
-        if (header->header) free(header->header);
+        if (header->field) free(header->field);
         if (header->value) free(header->value);
         next = header->next;
         free(header);
         header = next;
     }
     if (req->url) free(req->url);
+    if (req->body) free(req->body);
     free(req);
     __DEBUG("__httpd_request_free");
 }
@@ -161,17 +174,26 @@ __httpd_request_free(struct libhttpd_request *req) {
 static void
 __httpd_response_free(struct libhttpd_response *res) {
     struct libhttpd_header *header;
+    struct libhttpd_buffer *buffer;
 
     header = res->header.head;
     while (header) {
         struct libhttpd_header *next;
-        if (header->header) free(header->header);
+        if (header->field) free(header->field);
         if (header->value) free(header->value);
         next = header->next;
         free(header);
         header = next;
     }
-    if (res->body) free(res->body);
+
+    buffer = res->body.head;
+    while (buffer) {
+        struct libhttpd_buffer *next;
+        if (buffer->data) free(buffer->data);
+        next = buffer->next;
+        free(buffer);
+        buffer = next;
+    }
     free(res);
     __DEBUG("__httpd_response_free");
 }
@@ -188,6 +210,64 @@ __httpd_connection_free(struct libhttpd_connection *conn) {
     __DEBUG("__httpd_connection_free");
 }
 
+static void
+__libhttpd_connection_write(struct libhttpd_connection *conn, int writeable);
+
+static void
+__httpd_write(aeEventLoop *el, int fd, void *privdata, int mask) {
+    struct libhttpd_connection *conn;
+    UNUSED(el);
+    UNUSED(mask);
+
+    conn = (struct libhttpd_connection *)privdata;
+
+    __DEBUG("__httpd_write");
+    __libhttpd_connection_write(conn, 1);
+}
+
+static void
+__libhttpd_connection_write(struct libhttpd_connection *conn, int writeable) {
+    struct libhttpd *httpd;
+    struct libhttpd_response *res;
+    struct libhttpd_buffer *buffer;
+    ssize_t nwritten = 0;
+
+    httpd = conn->httpd;
+    res = conn->res;
+    while (res->body.head) {
+        buffer = res->body.head;
+        nwritten = write(conn->fd, buffer->data+res->buffer_pos, buffer->size-res->buffer_pos);
+        __DEBUG("__libhttpd_connection_write %d", nwritten);
+        if (nwritten <= 0) break;
+        res->buffer_pos += nwritten;
+        if (res->buffer_pos == buffer->size) {
+            res->buffer_pos = 0;
+            res->body.head = buffer->next;
+            free(buffer->data);
+            free(buffer);
+        }
+    }
+    if (nwritten == -1) {
+        if (errno == EAGAIN) {
+            nwritten = 0;
+        } else {
+            __WARN("__libhttpd_connection_write error: %s", strerror(errno));
+            __httpd_connection_free(conn);
+            return;
+        }
+    }
+    if (!res->body.head) {
+        res->buffer_pos = 0;
+        if (writeable) {
+            aeDeleteFileEvent(httpd->el, conn->fd, AE_WRITABLE);
+        }
+    } else {
+        if (aeCreateFileEvent(httpd->el, conn->fd, AE_WRITABLE, __httpd_write, conn) == AE_ERR) {
+            __WARN("aeCreateFileEvent error: %s", strerror(errno));
+            __httpd_connection_free(conn);
+        }
+    }
+}
 
 const char *libhttpd_request_method(struct libhttpd_request *req) {
     return http_method_str(req->conn->parser.method);
@@ -197,12 +277,12 @@ const char *libhttpd_request_url(struct libhttpd_request *req) {
     return req->url;
 }
 
-const char *libhttpd_request_header(struct libhttpd_request *req, const char *key) {
+const char *libhttpd_request_header(struct libhttpd_request *req, const char *field) {
     struct libhttpd_header *header;
 
     header = req->header.head;
     while (header) {
-        if (0 == strcasecmp(header->header, key)) {
+        if (0 == strcasecmp(header->field, field)) {
             return header->value;
         }
         header = header->next;
@@ -211,24 +291,24 @@ const char *libhttpd_request_header(struct libhttpd_request *req, const char *ke
 }
 
 const char *libhttpd_request_body(struct libhttpd_request *req, int *size) {
-    *size = req->size;
+    *size = req->body_size;
     return req->body;
 }
 
 
-void libhttpd_response_header(struct libhttpd_response *res, const char *key, const char *value) {
+void libhttpd_response_header(struct libhttpd_response *res, const char *field, const char *value) {
     struct libhttpd_header *header;
 
-    if (!key) return;
+    if (!field) return;
     header = res->header.head;
     while (header) {
-        if (0 == strcasecmp(header->header, key)) {
+        if (0 == strcasecmp(header->field, field)) {
             if (header->value) {
                 free(header->value);
                 header->value = 0;
             }
             if (value) header->value = strdup(value);
-            __DEBUG("libhttpd_response_header set header %s:%s", key, value);
+            __DEBUG("libhttpd_response_header set header %s:%s", field, value);
             return;
         }
         header = header->next;
@@ -238,7 +318,7 @@ void libhttpd_response_header(struct libhttpd_response *res, const char *key, co
     header = (struct libhttpd_header *)malloc(sizeof *header);
     memset(header, 0, sizeof *header);
 
-    header->header = strdup(key);
+    header->field = strdup(field);
     header->value = strdup(value);
     if (res->header.head == 0) {
         res->header.head = res->header.tail = header;
@@ -246,22 +326,36 @@ void libhttpd_response_header(struct libhttpd_response *res, const char *key, co
         res->header.tail->next = header;
         res->header.tail = header;
     }
-    __DEBUG("libhttpd_response_header add header %s:%s", key, value);
+    __DEBUG("libhttpd_response_header add header %s:%s", field, value);
 }
 
-void libhttpd_response_write(struct libhttpd_response *res, const char *body, int size) {
-    res->body = malloc(size);
-    memcpy(res->body, body, size);
-    res->size = size;
+void libhttpd_response_write(struct libhttpd_response *res, const char *data, int size) {
+    struct libhttpd_buffer *buffer;
+
+    buffer = (struct libhttpd_buffer *)malloc(sizeof *buffer);
+    memset(buffer, 0, sizeof *buffer);
+    buffer->data = malloc(size);
+    memcpy(buffer->data, data, size);
+    buffer->size = size;
+
+    if (res->body.head == 0) {
+        res->body.head = res->body.tail = buffer;
+    } else {
+        res->body.tail->next = buffer;
+        res->body.tail = buffer;
+    }
+
+    res->body_size += size;
     __DEBUG("libhttpd_response_write size:%d", size);
 }
 
 void libhttpd_response_end(struct libhttpd_response *res, int status) {
     struct libhttpd_connection *conn;
     struct libhttpd_header *header;
+    struct libhttpd_buffer *buffer;
     int n, nwrite;
-    int buff_size = LIBHTTPD_RES_BUFF + res->size;
-    char buff[buff_size];
+    char buff[LIBHTTPD_RES_HEADER_LEN];
+    int buff_size = LIBHTTPD_RES_HEADER_LEN;
 
     conn = res->conn;
     n = snprintf(buff, buff_size, "HTTP/1.1 %s\r\n", http_status_str(status));
@@ -269,16 +363,23 @@ void libhttpd_response_end(struct libhttpd_response *res, int status) {
     header = res->header.head;
     while (header) {
         if (header->value) {
-            n += snprintf(buff+n, buff_size-n, "%s: %s\r\n", header->header, header->value);
+            n += snprintf(buff+n, buff_size-n, "%s: %s\r\n", header->field, header->value);
         }
         header = header->next;
     }
-    n += snprintf(buff+n, buff_size-n, "Content-Length: %d\r\n\r\n", res->size);
-    n += snprintf(buff+n, buff_size-n, "%.*s", res->size, res->body);
+    n += snprintf(buff+n, buff_size-n, "Content-Length: %d\r\n\r\n", res->body_size);
 
-    nwrite = write(conn->fd, buff, n);
+    buffer = (struct libhttpd_buffer *)malloc(sizeof *buffer);
+    memset(buffer, 0, sizeof *buffer);
+    buffer->data = malloc(n);
+    memcpy(buffer->data, buff, n);
+    buffer->size = n;
 
-    __DEBUG("libhttpd_response_end write %d", nwrite);
+    buffer->next = res->body.head;
+    res->body.head = buffer;
+
+    __libhttpd_connection_write(conn, 0);
+    __DEBUG("libhttpd_response_end %s", http_status_str(status));
 }
 
 
@@ -335,7 +436,7 @@ __httpd_on_header_field(http_parser *p, const char *at, size_t length) {
     header = (struct libhttpd_header *)malloc(sizeof *header);
     memset(header, 0, sizeof *header);
 
-    header->header = strndup(at ,length);
+    header->field = strndup(at ,length);
     if (req->header.head == 0) {
         req->header.head = req->header.tail = header;
     } else {
@@ -357,8 +458,10 @@ __httpd_on_header_value(http_parser *p, const char *at, size_t length) {
     req = conn->req;
     header = req->header.tail;
 
-    if (header) header->value = strndup(at, length);
-    else __WARN("no header key when set header value");
+    header->value = strndup(at, length);
+    if (0 == strcasecmp(header->field, "Content-Length")) {
+        req->content_length = atoi(header->value);
+    }
 
     __DEBUG("__httpd_on_header_value %.*s", length, at);
     return 0;
@@ -366,6 +469,16 @@ __httpd_on_header_value(http_parser *p, const char *at, size_t length) {
 
 static int
 __httpd_on_headers_complete(http_parser *p) {
+    struct libhttpd_connection *conn;
+    struct libhttpd_request *req;
+
+    conn = (struct libhttpd_connection *)p->data;
+    req = conn->req;
+
+    if (req->content_length > 0) {
+        req->body = malloc(req->content_length);
+        memset(req->body, 0, req->content_length);
+    }
 
     __DEBUG("__httpd_on_headers_complete");
     return 0;
@@ -379,9 +492,15 @@ __httpd_on_body(http_parser *p, const char *at, size_t length) {
     conn = (struct libhttpd_connection *)p->data;
     req = conn->req;
 
-    req->body = malloc(length);
-    memcpy(req->body, at, length);
-    req->size = length;
+    if (req->body && req->body_size < req->content_length) {
+        if (req->content_length - req->body_size < length) {
+            length = req->content_length - req->body_size;
+            __WARN("__httpd_on_body content_length:%d body_size:%d length:%u",
+                   req->content_length, req->body_size, length);
+        }
+        memcpy(req->body+req->body_size, at, length);
+        req->body_size += length;
+    }
 
     __DEBUG("__httpd_on_body %.*s", length, at);
     return 0;
@@ -412,10 +531,10 @@ __httpd_on_message_complete(http_parser *p) {
 
 static void
 __httpd_read(aeEventLoop *el, int fd, void *privdata, int mask) {
-    struct libhttpd_connection *conn = (struct libhttpd_connection *) privdata;
-    struct libhttpd *httpd = conn->httpd;
+    struct libhttpd_connection *conn;
+    struct libhttpd *httpd;
     int nread, parsed;
-    char buff[LIBHTTPD_READ_BUFF];
+    char buff[LIBHTTPD_READ_LEN];
     UNUSED(el);
     UNUSED(mask);
 
@@ -430,7 +549,10 @@ __httpd_read(aeEventLoop *el, int fd, void *privdata, int mask) {
         .on_message_complete = __httpd_on_message_complete
     };
 
-    nread = read(fd, buff, LIBHTTPD_READ_BUFF);
+    conn = (struct libhttpd_connection *)privdata;
+    httpd = conn->httpd;
+
+    nread = read(fd, buff, LIBHTTPD_READ_LEN);
     __DEBUG("__httpd_read read %d", nread);
     if (nread == -1) {
         if (errno == EAGAIN) {
@@ -464,7 +586,7 @@ __httpd_connection(struct libhttpd *httpd, int fd, char *ip) {
     anetKeepAlive(0, fd, keepalive);
 
     if (aeCreateFileEvent(httpd->el, fd, AE_READABLE, __httpd_read, conn) == AE_ERR) {
-        __WARN("aeCreateFileEvent fail");
+        __WARN("aeCreateFileEvent AE_READABLE __httpd_read fail");
         close(fd);
         free(conn);
         return;
@@ -515,7 +637,7 @@ void libhttpd__serve(char *host, int port, void *ud, libhttpd_cb cb) {
     }
     anetNonBlock(0, httpd.fd);
     if (aeCreateFileEvent(httpd.el, httpd.fd, AE_READABLE, __httpd_accept, &httpd) == AE_ERR) {
-        __ERROR("aeCreateFileEvent failed");
+        __ERROR("aeCreateFileEvent AE_READABLE __httpd_accept failed");
         exit(1);
     }
 
