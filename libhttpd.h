@@ -64,7 +64,7 @@ extern LIBHTTPD_API const char *libhttpd_request_body(struct libhttpd_request *r
 
 /* generic libhttpd response functions. */
 extern LIBHTTPD_API void libhttpd_response_header(struct libhttpd_response *res, const char *field, const char *value);
-extern LIBHTTPD_API void libhttpd_response_write(struct libhttpd_response *res, const char *data, int size);
+extern LIBHTTPD_API char *libhttpd_response_write(struct libhttpd_response *res, const char *data, int size);
 extern LIBHTTPD_API void libhttpd_response_end(struct libhttpd_response *res, int status);
 
 /* generic libhttpd functions. */

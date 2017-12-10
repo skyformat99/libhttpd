@@ -329,7 +329,7 @@ void libhttpd_response_header(struct libhttpd_response *res, const char *field, 
     __DEBUG("libhttpd_response_header add header %s:%s", field, value);
 }
 
-void libhttpd_response_write(struct libhttpd_response *res, const char *data, int size) {
+char *libhttpd_response_write(struct libhttpd_response *res, const char *data, int size) {
     struct libhttpd_buffer *buffer;
 
     buffer = (struct libhttpd_buffer *)malloc(sizeof *buffer);
@@ -347,6 +347,8 @@ void libhttpd_response_write(struct libhttpd_response *res, const char *data, in
 
     res->body_size += size;
     __DEBUG("libhttpd_response_write size:%d", size);
+
+    return buffer->data;
 }
 
 void libhttpd_response_end(struct libhttpd_response *res, int status) {
