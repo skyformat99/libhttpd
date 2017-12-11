@@ -97,6 +97,7 @@ struct libhttpd_response {
 
 struct libhttpd_connection {
     int fd;
+    int close;
 
     http_parser parser;
     struct libhttpd *httpd;
@@ -195,6 +196,11 @@ static void
 __httpd_connection_free(struct libhttpd_connection *conn) {
     struct libhttpd_buffer *buffer;
 
+    if (conn->buffer.head) {
+        conn->close = 1;
+        return;
+    }
+
     aeDeleteFileEvent(conn->httpd->el, conn->fd, AE_READABLE);
     aeDeleteFileEvent(conn->httpd->el, conn->fd, AE_WRITABLE);
     close(conn->fd);
@@ -259,6 +265,10 @@ __libhttpd_connection_write(struct libhttpd_connection *conn, int writeable) {
         }
     }
     if (!conn->buffer.head) {
+        if (conn->close == 1) {
+            __httpd_connection_free(conn);
+            return;
+        }
         conn->buffer_pos = 0;
         if (writeable) {
             aeDeleteFileEvent(httpd->el, conn->fd, AE_WRITABLE);
