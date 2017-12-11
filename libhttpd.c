@@ -196,7 +196,7 @@ static void
 __httpd_connection_free(struct libhttpd_connection *conn) {
     struct libhttpd_buffer *buffer;
 
-    if (conn->buffer.head) {
+    if (conn->buffer.head && conn->close == 0) {
         conn->close = 1;
         return;
     }
@@ -260,6 +260,7 @@ __libhttpd_connection_write(struct libhttpd_connection *conn, int writeable) {
             nwritten = 0;
         } else {
             __WARN("__libhttpd_connection_write error: %s", strerror(errno));
+            conn->close = 1;
             __httpd_connection_free(conn);
             return;
         }
@@ -276,6 +277,7 @@ __libhttpd_connection_write(struct libhttpd_connection *conn, int writeable) {
     } else {
         if (aeCreateFileEvent(httpd->el, conn->fd, AE_WRITABLE, __httpd_write, conn) == AE_ERR) {
             __WARN("aeCreateFileEvent error: %s", strerror(errno));
+            conn->close = 1;
             __httpd_connection_free(conn);
         }
     }
@@ -574,6 +576,7 @@ __httpd_read(aeEventLoop *el, int fd, void *privdata, int mask) {
             return;
         } else {
             __WARN("__httpd_read reading from connection: %s", strerror(errno));
+            conn->close = 1;
             __httpd_connection_free(conn);
             return;
         }
