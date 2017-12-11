@@ -92,11 +92,6 @@ struct libhttpd_response {
         struct libhttpd_header *tail;
     } header;
 
-    struct {
-        struct libhttpd_buffer *head;
-        struct libhttpd_buffer *tail;
-    } body;
-    int buffer_pos;
     int body_size;
 };
 
@@ -108,6 +103,12 @@ struct libhttpd_connection {
 
     struct libhttpd_request *req;
     struct libhttpd_response *res;
+
+    struct {
+        struct libhttpd_buffer *head;
+        struct libhttpd_buffer *tail;
+    } buffer;
+    int buffer_pos;
 };
 
 struct libhttpd {
@@ -174,7 +175,6 @@ __httpd_request_free(struct libhttpd_request *req) {
 static void
 __httpd_response_free(struct libhttpd_response *res) {
     struct libhttpd_header *header;
-    struct libhttpd_buffer *buffer;
 
     header = res->header.head;
     while (header) {
@@ -186,14 +186,6 @@ __httpd_response_free(struct libhttpd_response *res) {
         header = next;
     }
 
-    buffer = res->body.head;
-    while (buffer) {
-        struct libhttpd_buffer *next;
-        if (buffer->data) free(buffer->data);
-        next = buffer->next;
-        free(buffer);
-        buffer = next;
-    }
     free(res);
     __DEBUG("__httpd_response_free");
 }
@@ -201,9 +193,21 @@ __httpd_response_free(struct libhttpd_response *res) {
 
 static void
 __httpd_connection_free(struct libhttpd_connection *conn) {
+    struct libhttpd_buffer *buffer;
+
     aeDeleteFileEvent(conn->httpd->el, conn->fd, AE_READABLE);
     aeDeleteFileEvent(conn->httpd->el, conn->fd, AE_WRITABLE);
     close(conn->fd);
+
+    buffer = conn->buffer.head;
+    while (buffer) {
+        struct libhttpd_buffer *next;
+        if (buffer->data) free(buffer->data);
+        next = buffer->next;
+        free(buffer);
+        buffer = next;
+    }
+
     if (conn->req) __httpd_request_free(conn->req);
     if (conn->res) __httpd_response_free(conn->res);
     free(conn);
@@ -228,21 +232,19 @@ __httpd_write(aeEventLoop *el, int fd, void *privdata, int mask) {
 static void
 __libhttpd_connection_write(struct libhttpd_connection *conn, int writeable) {
     struct libhttpd *httpd;
-    struct libhttpd_response *res;
     struct libhttpd_buffer *buffer;
     ssize_t nwritten = 0;
 
     httpd = conn->httpd;
-    res = conn->res;
-    while (res->body.head) {
-        buffer = res->body.head;
-        nwritten = write(conn->fd, buffer->data+res->buffer_pos, buffer->size-res->buffer_pos);
+    while (conn->buffer.head) {
+        buffer = conn->buffer.head;
+        nwritten = write(conn->fd, buffer->data+conn->buffer_pos, buffer->size-conn->buffer_pos);
         __DEBUG("__libhttpd_connection_write %d", nwritten);
         if (nwritten <= 0) break;
-        res->buffer_pos += nwritten;
-        if (res->buffer_pos == buffer->size) {
-            res->buffer_pos = 0;
-            res->body.head = buffer->next;
+        conn->buffer_pos += nwritten;
+        if (conn->buffer_pos == buffer->size) {
+            conn->buffer_pos = 0;
+            conn->buffer.head = buffer->next;
             free(buffer->data);
             free(buffer);
         }
@@ -256,8 +258,8 @@ __libhttpd_connection_write(struct libhttpd_connection *conn, int writeable) {
             return;
         }
     }
-    if (!res->body.head) {
-        res->buffer_pos = 0;
+    if (!conn->buffer.head) {
+        conn->buffer_pos = 0;
         if (writeable) {
             aeDeleteFileEvent(httpd->el, conn->fd, AE_WRITABLE);
         }
@@ -330,7 +332,10 @@ void libhttpd_response_header(struct libhttpd_response *res, const char *field, 
 }
 
 char *libhttpd_response_write(struct libhttpd_response *res, const char *data, int size) {
+    struct libhttpd_connection *conn;
     struct libhttpd_buffer *buffer;
+
+    conn = res->conn;
 
     buffer = (struct libhttpd_buffer *)malloc(sizeof *buffer);
     memset(buffer, 0, sizeof *buffer);
@@ -338,11 +343,11 @@ char *libhttpd_response_write(struct libhttpd_response *res, const char *data, i
     memcpy(buffer->data, data, size);
     buffer->size = size;
 
-    if (res->body.head == 0) {
-        res->body.head = res->body.tail = buffer;
+    if (conn->buffer.head == 0) {
+        conn->buffer.head = conn->buffer.tail = buffer;
     } else {
-        res->body.tail->next = buffer;
-        res->body.tail = buffer;
+        conn->buffer.tail->next = buffer;
+        conn->buffer.tail = buffer;
     }
 
     res->body_size += size;
@@ -377,8 +382,8 @@ void libhttpd_response_end(struct libhttpd_response *res, int status) {
     memcpy(buffer->data, buff, size);
     buffer->size = size;
 
-    buffer->next = res->body.head;
-    res->body.head = buffer;
+    buffer->next = conn->buffer.head;
+    conn->buffer.head = buffer;
 
     __libhttpd_connection_write(conn, 0);
     __DEBUG("libhttpd_response_end %s", http_status_str(status));
