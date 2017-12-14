@@ -133,11 +133,17 @@ __log(int level, const char *fmt, ...) {
     int n;
     va_list ap;
     char logbuf[LIBHTTPD_LOG_LEN];
+    static const char *__libhttpd_loglevel_strings[] = {
+        "DEBUG",
+        "INFO",
+        "WARN",
+        "ERROR",
+    };
 
     if (level < g_log_level) return;
-
+    n = snprintf(logbuf, LIBHTTPD_LOG_LEN, "[%s] ", __libhttpd_loglevel_strings[level]);
     va_start(ap, fmt);
-    n = vsnprintf(logbuf, LIBHTTPD_LOG_LEN, fmt, ap);
+    n = vsnprintf(logbuf+n, LIBHTTPD_LOG_LEN-n, fmt, ap);
     va_end(ap);
     logbuf[n] = '\0';
     fprintf(stdout, "%s\n", logbuf);
